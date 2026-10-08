@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard Keamanan - Contoh Modul 3</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b1220;--glass:rgba(255,255,255,.06);--line:rgba(255,255,255,.12);--text:#e8edf7;--mute:#93a0b8;--aman:#2ecc8f;--bahaya:#ff5a5f;--aksen:#6c8cff}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Plus Jakarta Sans",system-ui,sans-serif;background:radial-gradient(circle at 20% 0,#16244a,var(--bg) 55%);color:var(--text);min-height:100vh;padding:24px}
+h1{font-size:1.4rem;margin:0 0 20px;font-weight:800}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));max-width:1000px;margin:auto}
+.panel{background:var(--glass);border:1px solid var(--line);border-radius:14px;padding:18px;backdrop-filter:blur(10px)}
+.panel h2{font-size:1rem;margin:0 0 12px}
+#metric{grid-column:1/-1;transition:border-color .3s,background .3s}
+#metric .nilai{font-size:2.4rem;font-weight:800}
+#metric.aman{border-color:var(--aman)} #metric.aman .nilai{color:var(--aman)}
+#metric.bahaya{border-color:var(--bahaya);background:rgba(255,90,95,.1)} #metric.bahaya .nilai{color:var(--bahaya)}
+label{display:block;font-size:.8rem;color:var(--mute);margin:10px 0 4px}
+input,select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--text);font:inherit}
+button{margin-top:12px;padding:10px 14px;border:0;border-radius:8px;background:var(--aksen);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fff;outline-offset:2px}
+pre{background:rgba(0,0,0,.35);padding:10px;border-radius:8px;overflow:auto;font-size:.8rem;min-height:60px;margin:12px 0 0}
+</style>
+</head>
+<body>
+<h1>Dashboard Keamanan Sistem</h1>
+<div class="grid">
+  <section class="panel aman" id="metric">
+    <h2>Status sistem</h2>
+    <div class="nilai" id="statusTeks">AMAN</div>
+    <div id="statusDetail" style="color:var(--mute)">Belum ada ancaman terdeteksi.</div>
+  </section>
+
+  <section class="panel">
+    <h2>Simulator webhook HMAC</h2>
+    <label for="secret">Kunci rahasia (HMAC secret)</label>
+    <input id="secret" value="rahasia-demo">
+    <label for="skenario">Skenario</label>
+    <select id="skenario">
+      <option value="valid">Valid (harus 200)</option>
+      <option value="tampered">Tampered (harus 401)</option>
+      <option value="missing">Tanpa signature (harus 400)</option>
+    </select>
+    <button id="btnWebhook">Kirim webhook</button>
+    <pre id="hasilWebhook">Hasil akan tampil di sini.</pre>
+  </section>
+
+  <section class="panel">
+    <h2>Benchmark AI (RF + SVM)</h2>
+    <label for="dataAI">Data log</label>
+    <input id="dataAI" value="login gagal berulang di port 5432">
+    <button id="btnAI">Jalankan analisis paralel</button>
+    <pre id="hasilAI">Hasil akan tampil di sini.</pre>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// HMAC-SHA256 di sisi klien memakai Web Crypto API
+async function hmacHex(secret, pesan){
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), {name:"HMAC", hash:"SHA-256"}, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(pesan));
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+function setStatus(bahaya, detail){
+  $("metric").className = "panel " + (bahaya ? "bahaya" : "aman");
+  $("statusTeks").textContent = bahaya ? "BAHAYA" : "AMAN";
+  $("statusDetail").textContent = detail;
+}
+
+$("btnWebhook").onclick = async () => {
+  const body = JSON.stringify({status:"ALERT", level:3, pesan:"Percobaan login gagal pada port 5432"});
+  const skenario = $("skenario").value;
+  const headers = {"Content-Type":"application/json"};
+  if (skenario !== "missing") {
+    let sig = await hmacHex($("secret").value, body);
+    if (skenario === "tampered") sig = sig.replace(/^./, c => c === "a" ? "b" : "a");
+    headers["x-signature"] = sig;
+  }
+  try {
+    const r = await fetch("/api/webhook", {method:"POST", headers, body});
+    const j = await r.json();
+    $("hasilWebhook").textContent = `HTTP ${r.status}\n` + JSON.stringify(j, null, 2);
+    if (r.status === 200) setStatus(true, "Ancaman level 3 diterima dan alert dikirim ke Telegram.");
+  } catch (e) { $("hasilWebhook").textContent = "Gagal terhubung: " + e.message; }
+};
+
+$("btnAI").onclick = async () => {
+  try {
+    const r = await fetch("/api/proses_ai?input=" + encodeURIComponent($("dataAI").value));
+    const j = await r.json();
+    $("hasilAI").textContent = JSON.stringify(j, null, 2);
+    setStatus(j.rf.label === "BAHAYA" || j.svm.label === "BAHAYA", `Hasil AI dalam ${j.duration_seconds} detik.`);
+  } catch (e) { $("hasilAI").textContent = "Gagal terhubung: " + e.message; }
+};
+</script>
+</body>
+</html>
